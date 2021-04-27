@@ -1,0 +1,12 @@
+[submodule "Tools/kincmake"]
+	path = Tools/kincmake
+	url = https://github.com/Kode/kincmake.git
+[submodule "Libraries/stb"]
+	path = Libraries/stb
+	url = https://github.com/nothings/stb.git
+[submodule "Libraries/cJSON"]
+	path = Libraries/cJSON
+	url = https://github.com/DaveGamble/cJSON.git
+[submodule "Libraries/curl"]
+	path = Libraries/curl
+	url = https://github.com/curl/curl.git
