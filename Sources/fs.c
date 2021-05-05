@@ -89,6 +89,11 @@ uint32_t readDir(const char *path, bool with_extensions, char **out) {
 	for(; dirinfo != NULL; dirinfo = readdir(dir)){
         if(dirinfo->d_type != DT_DIR){
             strcpy(out[count], dirinfo->d_name);
+            if(!with_extensions){
+                char ext[8] = {0};
+                getExtension(out[count],ext);
+                out[count][strlen(out[count])-strlen(ext)] = 0;
+            }
             count++;
         }
 	}
