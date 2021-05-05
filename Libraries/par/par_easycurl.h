@@ -148,10 +148,12 @@ int par_easycurl_to_memory(char const* url, par_byte** data, int* nbytes)
     curl_easy_setopt(handle, CURLOPT_TIMECONDITION, CURL_TIMECOND_IFMODSINCE);
     curl_easy_setopt(handle, CURLOPT_TIMEVALUE, 0);
     curl_easy_setopt(handle, CURLOPT_HTTPHEADER, 0);
+    //curl_easy_setopt(handle, CURLOPT_HEADER, 1);
     curl_easy_setopt(handle, CURLOPT_TIMEOUT, 60);
     curl_easy_setopt(handle, CURLOPT_ERRORBUFFER, errbuf);
+    curl_easy_setopt(handle, CURLOPT_USERAGENT,"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36");
     curl_easy_setopt(handle, CURLOPT_SSL_VERIFYHOST, 0);
-    curl_easy_setopt(handle, CURLOPT_SSL_VERIFYPEER, 0);
+    curl_easy_setopt(handle, CURLOPT_CAINFO, "cacert.pem");
     CURLcode res = curl_easy_perform(handle);
     if (res != CURLE_OK) {
         printf("CURL Error: %s\n", errbuf);
