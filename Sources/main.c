@@ -13,12 +13,25 @@
 #define PAR_EASYCURL_IMPLEMENTATION
 #include "par_easycurl.h"
 
-
+#define SHELL_AMOUNT 5
+#define COMMAND_AMOUNT 7
 const char* ghLink = "https://github.com/";
 const char* ghApiLink = "https://api.github.com/repos/";
 const char* desktopFilesLocal = ".local/share/applications";
 const char* iconsFolder = "shovel/icons";
 const char* desktopFilesShared = "/usr/share/applications";
+const char* exportPath = "export PATH=$PATH:";
+const char* supportedTerminals[SHELL_AMOUNT] = {"bash","zsh","dash","fish","rc"};
+const char* commands[COMMAND_AMOUNT] = {"install","uninstall or rm","update","info","search","list","help"};
+const char* commandsTxt[COMMAND_AMOUNT] = {
+                                            "Install an appimage based on the name supplied. i.e. shovel install vscodium",
+                                            "Uninstall an appimage based on the name supplied. i.e. shovel rm vscodium",
+                                            "Update the appimage based on the name supplied. Use the * wildcard to update all.",
+                                            "Give the info related to the appimage if it exists",
+                                            "Search for available appimages on the appimage hub. Can be a substring of the name.",
+                                            "List the installed appimages on the system by shovel.",
+                                            "Show this beautiful text to help you ☻"
+};
 char* home;
 
 void fixText(char toRemove,char* from){
@@ -45,6 +58,13 @@ int strCmpi (char *haystack,char *needle)
             return 1;
     }
     return 0;
+}
+
+void toLower(char* txt){
+    int len = strlen(txt);
+    for(int i = 0; i < len; ++i){
+        txt[i] = tolower(txt[i]);
+    }
 }
 
 void listInstalled(){
@@ -113,18 +133,16 @@ int search(char* subname, cJSON* apps, cJSON** out_apps ){
     int count = 0;
     char otherName[64] = {0};
     memcpy(otherName,subname,strlen(subname)+1);
-    if(isupper(subname[0])){
-        otherName[0] = tolower(otherName[0]);
-    }
-    else {
-        otherName[0] = toupper(otherName[0]);
-    }
+    toLower(otherName);
     while(i < len){
         cJSON* data = cJSON_GetArrayItem(apps,i);
         cJSON* out = cJSON_GetObjectItem(data,"name");
         char* curAppName = cJSON_Print(out);
         fixText('\"',curAppName);
-        if(strstr(curAppName, subname) != NULL || strstr(curAppName, otherName) != NULL){
+        char otherAppName[64] = {0};
+        strcpy(otherAppName,curAppName);
+        toLower(otherAppName);
+        if(strstr(curAppName, subname) != NULL || strstr(otherAppName, otherName) != NULL){
             out_apps[count] = data;
             count++;
         }
@@ -416,6 +434,19 @@ void install(cJSON* app){
         strcat(path,fname);
         rename(fname,path);
 
+        char symbolPath[PATHNAME_MAX] = {0};
+        char symbolName[PATHNAME_MAX] = {0};
+        strcpy(symbolName,desktop);
+        symbolName[strlen(desktop)-8] = 0;
+        toLower(symbolName);
+        sprintf(symbolPath,"%s/shovel/symbols/%s",home,symbolName);
+        if(symlink(path,symbolPath) == 0){
+            kinc_log(KINC_LOG_LEVEL_INFO,"Successfully created a symlink %s for %s.You can start the app from your shell.",symbolName,name);
+        }
+        else {
+            kinc_log(KINC_LOG_LEVEL_INFO,"Coulnd't create a symlink for %s.",name);
+        }
+
         strcat(iconsPath,"/");
         strcat(iconsPath,image);
 
@@ -538,7 +569,6 @@ void uninstall(char* manifestPath,char* name){
     rmFile(desktopPath);
 
     fclose(srcFile);
-    cJSON_Delete(manifest);
 
     rmFile(manifestPath);
 
@@ -551,7 +581,19 @@ void uninstall(char* manifestPath,char* name){
     strcat(path,"/");
     strcat(path,name);
 
+    char symbolPath[PATHNAME_MAX] = {0};
+    char symbolName[PATHNAME_MAX] = {0};
+    getFilename(desktopPath,symbolName);
+    symbolName[strlen(symbolName)-8] = 0;
+    toLower(symbolName);
+    sprintf(symbolPath,"%s/shovel/symbols/%s",home,symbolName);
+    if(rmFile(symbolPath)){
+        kinc_log(KINC_LOG_LEVEL_INFO,"Successfully removed symlink %s from PATH.",symbolName);
+    }
+
     recursiveRmDir(path);
+
+    cJSON_Delete(manifest);
 }
 
 void update(char* manifestPath, cJSON* app){
@@ -615,6 +657,34 @@ void update(char* manifestPath, cJSON* app){
         kinc_log(KINC_LOG_LEVEL_WARNING,"App isn't available on the appimage hub anymore, and can't be updated :(");
     }
 }
+
+bool verifyShell(char* term){
+    for(int i = 0; i < SHELL_AMOUNT;++i){
+        if(strcmp(term,supportedTerminals[i]) == 0){
+            return true;
+        }
+    }
+    return false;
+}
+void initialize(char* term){
+    char path[PATHNAME_MAX] = {0};
+    char exportLine[PATHNAME_MAX] = {0};
+    sprintf(exportLine,"%s%s/%s",exportPath,home,"shovel/symbols");
+    sprintf(path,"%s/.%src",home,term);
+    FILE* f = fopen(path,"a");
+    fprintf(f,"%s",exportLine);
+    fclose(f);
+    sprintf(path,"%s/shovel/symbols",home);
+    recursiveMkdir(path,S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+
+}
+void printHelp(){
+    printf("Available commands\n");
+    for(int i = 0; i < COMMAND_AMOUNT; ++i){
+        printf("%s:\n",commands[i]);
+        printf("\t%s\n",commandsTxt[i]);
+    }
+}
 /**
     available actions are:
         - install
@@ -668,7 +738,7 @@ int main(int argc, char** argv) {
 
 	cJSON* parsed = cJSON_Parse(txt);
 	cJSON* apps = cJSON_GetObjectItem(parsed,"items");
-	if(argc > 2){
+	if(argc > 2 &&  strcmp(argv[1],"init") != 0){
         char manifestPath[PATHNAME_MAX] = {0};
         strcat(manifestPath,home);
         strcat(manifestPath,"/");
@@ -719,7 +789,7 @@ int main(int argc, char** argv) {
 
             }
             else {
-                printf("App %s isn't on the AppImage Hub",argv[2]);
+                kinc_log(KINC_LOG_LEVEL_INFO,"App %s isn't on the AppImage Hub",argv[2]);
             }
         }
         else if(strcmp(argv[1],"info") == 0){
@@ -735,11 +805,25 @@ int main(int argc, char** argv) {
 
 	}
 	else {
-        if(strcmp(argv[1],"list") == 0){
+        if(argc > 1 && strcmp(argv[1],"init") == 0){
+            char* term = "bash";
+            bool isValid = argc > 2 ? verifyShell(argv[2]) : true;
+            if(argc > 2 && isValid){
+                term = argv[2];
+            }
+            else if(argc > 2 && !isValid){
+                kinc_log(KINC_LOG_LEVEL_WARNING,"The shell app passed %s isn't officialy supported since it's for special snowflakes as yourself ;)\nYou can make a PR if you would like to use it with shovel.\nFor now, we will default to bash if it's installed.",argv[2]);
+            }
+            else {
+                kinc_log(KINC_LOG_LEVEL_INFO,"No shell app passed to init command.For now, we will default to bash if it's installed.");
+            }
+            initialize(term);
+        }
+        else if(argc > 1 && strcmp(argv[1],"list") == 0){
             listInstalled();
         }
         else {
-            //printHelp();
+            printHelp();
         }
 	}
 
