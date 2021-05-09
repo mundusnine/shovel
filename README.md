@@ -1,7 +1,9 @@
 # shovel
-An appimage installer(think scoop.sh on linux)
+![](https://ghcdn.rawgit.org/mundusnine/shovel/main/assets/shovel_icon.png)
+
+An appimage installer(think scoop.sh or homebrew on linux)
 
 
-dependency: 
-    - libcurl on debian `apt install libcurl3-gnutls` if it isnt already installed
-        (we may add this locally to the repo eventually)
+All dependencies are versionned with git and self-contained in the Libraries folder.
+
+
