@@ -2,7 +2,7 @@ const fs = require('fs-extra');
 const child = require('child_process');
 const path = require('path');
 
-const verbose = process.argv.indexOf("--verbose") != -1;
+const verbose = process.argv.indexOf("--notverbose") != -1;
 
 let project = new Project('Shovel');
 
@@ -18,7 +18,7 @@ project.addIncludeDir('Libraries/par');
 
 fs.ensureDirSync('Deployment');
 
-const opts = verbose ? {stdio: 'inherit'} : {};
+const opts = verbose ? {} : {stdio: 'inherit'};
 child.execSync("cmake ./Libraries/curl -DBUILD_SHARED_LIBS=OFF", opts);
 child.execSync('make -C ./Libraries/curl libcurl', opts);
 child.execSync('cd ./Libraries/openssl && ./Configure && make build_libs', opts);
