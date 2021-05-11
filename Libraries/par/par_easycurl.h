@@ -10,6 +10,21 @@
 #ifndef PAR_EASYCURL_H
 #define PAR_EASYCURL_H
 
+#include <curl/system.h>
+#include <curl/curl.h>
+
+typedef struct ProgressData {
+  int         calls;
+  curl_off_t  prev;
+  int         width;
+  FILE       *out;  /* where to write everything to */
+  curl_off_t  initial_size;
+  unsigned int tick;
+  int bar;
+  int barmove;
+} ProgressData_t;
+
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -18,13 +33,13 @@ typedef unsigned char par_byte;
 
 // Call this before calling any other easycurl function.  The flags are
 // currently unused, so you can just pass 0.
-void par_easycurl_init(unsigned int flags);
+void par_easycurl_init(unsigned int flags,struct ProgressData* bardata);
 
 // Allocates a memory buffer and downloads a data blob into it.
 // Returns 1 for success and 0 otherwise.  The byte count should be
 // pre-allocated.  The caller is responsible for freeing the returned data.
 // This does not do any caching!
-int par_easycurl_to_memory(char const* url, par_byte** data, int* nbytes);
+int par_easycurl_to_memory(char const* url, par_byte** data, int* nbytes,curl_xferinfo_callback progress_callback);
 
 // Downloads a file from the given URL and saves it to disk.  Returns 1 for
 // success and 0 otherwise.
@@ -43,7 +58,7 @@ int par_easycurl_to_file(char const* srcurl, char const* dstpath);
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <curl/curl.h>
+#include <curl/easy.h>
 
 #ifdef _MSC_VER
 #define strncasecmp _strnicmp
@@ -52,14 +67,95 @@ int par_easycurl_to_file(char const* srcurl, char const* dstpath);
 #include <strings.h>
 #endif
 
-static int _ready = 0;
+#define MAX_BARLENGTH 256
 
-void par_easycurl_init(unsigned int flags)
+int load_cacertfile(const char *filename, void **filedata, size_t *filesize)
+{
+  size_t datasize = 0;
+  void *data = NULL;
+  if(filename) {
+    FILE *fInCert = fopen(filename, "rb");
+
+    if(fInCert) {
+      long cert_tell = 0;
+      bool continue_reading = fseek(fInCert, 0, SEEK_END) == 0;
+      if(continue_reading)
+        cert_tell = ftell(fInCert);
+      if(cert_tell < 0)
+        continue_reading = 0;
+      else
+        datasize = (size_t)cert_tell;
+      if(continue_reading)
+         continue_reading = fseek(fInCert, 0, SEEK_SET) == 0;
+      if(continue_reading)
+          data = malloc(datasize + 1);
+      if((!data) ||
+          ((int)fread(data, datasize, 1, fInCert) != 1))
+          continue_reading = 0;
+      fclose(fInCert);
+      if(!continue_reading) {
+        free(data);
+        datasize = 0;
+        data = NULL;
+      }
+   }
+  }
+  *filesize = datasize;
+  *filedata = data;
+  return data ? 1 : 0;
+}
+
+void progressbarinit(struct ProgressData *bar,FILE* out)
+{
+  char *colp;
+  memset(bar, 0, sizeof(struct ProgressData));
+
+  colp = curl_getenv("COLUMNS");
+  if(colp) {
+    char *endptr;
+    long num = strtol(colp, &endptr, 10);
+    if((endptr != colp) && (endptr == colp + strlen(colp)) && (num > 20) &&
+       (num < 10000))
+      bar->width = (int)num;
+    curl_free(colp);
+  }
+
+  if(!bar->width) {
+    int cols = 0;
+    if(cols > 20)
+      bar->width = cols;
+  }
+
+  if(!bar->width)
+    bar->width = 79;
+  else if(bar->width > MAX_BARLENGTH)
+    bar->width = MAX_BARLENGTH;
+
+  bar->out = out == NULL ? stderr : out;
+  bar->tick = 150;
+  bar->barmove = 1;
+}
+
+static int _ready = 0;
+static struct ProgressData* bar = NULL;
+//static struct curl_blob* blob; Add me back when Blob loading is available in curl stable
+void par_easycurl_init(unsigned int flags,struct ProgressData* bardata)
 {
     if (!_ready) {
         curl_global_init(CURL_GLOBAL_DEFAULT);
         _ready = 1;
     }
+    /*blob = malloc(sizeof(struct curl_blob));
+    size_t certsize;
+    void *certdata;
+    if(!load_cacertfile("cacert.pem",&certdata,&certsize)){
+        printf("Couldn't load cacert file. Https won't work.");
+        free(blob);
+    }
+    blob->data = certdata;
+    blob->len = certsize;
+    blob->flags = CURL_BLOB_COPY;*/
+    bar = bardata;
 }
 
 void par_easycurl_shutdown()
@@ -67,6 +163,12 @@ void par_easycurl_shutdown()
     if (_ready) {
         curl_global_cleanup();
     }
+    /*if(blob != NULL){
+        if(blob->data != NULL)
+            free(blob->data);
+        free(blob);
+    }*/
+    bar = NULL;
 }
 
 static size_t onheader(void* v, size_t size, size_t nmemb)
@@ -130,7 +232,7 @@ bool curlToMemory(char const* url, uint8_t** data, int* nbytes)
 
 #endif
 
-int par_easycurl_to_memory(char const* url, par_byte** data, int* nbytes)
+int par_easycurl_to_memory(char const* url, par_byte** data, int* nbytes,curl_xferinfo_callback progress_callback)
 {
     char errbuf[CURL_ERROR_SIZE] = {0};
     par_easycurl_buffer buffer = {(par_byte*) malloc(1), 0};
@@ -141,6 +243,12 @@ int par_easycurl_to_memory(char const* url, par_byte** data, int* nbytes)
     curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1);
     curl_easy_setopt(handle, CURLOPT_MAXREDIRS, 8);
     curl_easy_setopt(handle, CURLOPT_FAILONERROR, 1);
+    if(progress_callback != NULL && bar != NULL){
+        progressbarinit(bar,bar->out);
+        curl_easy_setopt(handle,CURLOPT_NOPROGRESS,0);
+        curl_easy_setopt(handle,CURLOPT_XFERINFOFUNCTION,progress_callback);
+        curl_easy_setopt(handle,CURLOPT_XFERINFODATA,bar);
+    }
     curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, onwrite);
     curl_easy_setopt(handle, CURLOPT_WRITEDATA, &buffer);
     curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, onheader);
@@ -149,12 +257,16 @@ int par_easycurl_to_memory(char const* url, par_byte** data, int* nbytes)
     curl_easy_setopt(handle, CURLOPT_TIMEVALUE, 0);
     curl_easy_setopt(handle, CURLOPT_HTTPHEADER, 0);
     //curl_easy_setopt(handle, CURLOPT_HEADER, 1);
-    curl_easy_setopt(handle, CURLOPT_TIMEOUT, 60);
+    curl_easy_setopt(handle, CURLOPT_TIMEOUT, 100);
     curl_easy_setopt(handle, CURLOPT_ERRORBUFFER, errbuf);
     curl_easy_setopt(handle, CURLOPT_USERAGENT,"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36");
     curl_easy_setopt(handle, CURLOPT_SSL_VERIFYHOST, 0);
+    curl_easy_setopt(handle, CURLOPT_SSL_VERIFYPEER, 1);
+    //curl_easy_setopt(handle, CURLOPT_CAINFO, blob);
     curl_easy_setopt(handle, CURLOPT_CAINFO, "cacert.pem");
     CURLcode res = curl_easy_perform(handle);
+    if(bar != NULL && bar->calls)
+        fputs("\n",bar->out);
     if (res != CURLE_OK) {
         printf("CURL Error: %s\n", errbuf);
         return 0;
