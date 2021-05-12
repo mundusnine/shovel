@@ -1,5 +1,5 @@
 # shovel
-![](https://ghcdn.rawgit.org/mundusnine/shovel/main/assets/shovel_icon.png)
+![](https://raw.githubusercontent.com/mundusnine/shovel/main/assets/shovel_icon.png)
 
 An appimage installer(think scoop.sh or homebrew on linux)
 
